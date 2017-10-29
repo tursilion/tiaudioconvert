@@ -7,7 +7,7 @@ tiaudioconvert v 1.2
 
 Quick and dirty tool to remap audio to the TI's sound chip. Uses a non-mathematical approach.
 
-This is meant to be a part of the [TIVidConvert](git@github.com:tursilion/tividconvert.git) package.
+This is meant to be a part of the [TIVidConvert](https://github.com/tursilion/tividconvert) package.
 
 Download the latest release zip here: [https://github.com/tursilion/tiaudioconvert/raw/master/dist/audioconvert.zip](https://github.com/tursilion/tiaudioconvert/raw/master/dist/audioconvert.zip)
 
