@@ -13,10 +13,15 @@ unsigned char *wavein, *waveout;
 // These values are manually tweaked to give a more pleasing conversion,
 // the output uses the real table for a better sample of what it might
 // sound like.
+// TODO: the duplication of 127 is a bug that costs us some resolution
+// Also, there are only 15 entries, so mute is not considered, and 16 values are tested (probably 0?)
+// I've added the missing 0 and changed the second 127 to 125, but this is untested...
+// (Confirmed that tools are using the entire range, except the missing index 9, which was the second 127)
 int sms_volume_table[16]={
 	255,191,159,143,135,131,129,
 	128,	//50,
-	127,127,121,113,97,65,30		// bottom half steps faster than top to try and equalize it
+	127,125,121,113,97,65,30,0		// bottom half steps faster than top to try and equalize it
+//      ^^^                 ^^   new entries, untested, todo above
 
 //	240,215,190,170,155,140,129,
 //	128,	//50,
@@ -27,7 +32,7 @@ int real_sms_volume_table[16]={
 	50,
 	40,32,24,20,16,12,10,0
 };
-// input: 0 (silent) to 127 (max)
+// input: 8 bit unsigned audio (centers on 128)
 // output: 15 (silent) to 0 (max)
 int maplevel(int nTmp) {
 	int nBest = -1;
