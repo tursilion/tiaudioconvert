@@ -117,6 +117,62 @@ int maplevel(int nTmp) {
 			nDistance = abs(real_sms_volume_table[idx]-nTmp);
 		}
 	}
+#elif 0
+    // everyone says this should work, but I think it only works on chips that
+    // can manage a flat line output, like the AY. But here we attempt to manage
+    // all three voices. The player is not currently set up for this, I'm
+    // testing via hacks
+    // But the idea is that there is a much better range available by adding
+    // all three voices together. We still need to piecemeal it with this
+    // player, but it's worth an experiment.
+    // Okay, this sounds awful even when the channels are in sync, and is likely to
+    // be worse if they are not. The square wave carrier causes too much noise
+    static int nLast1 = 15, nLast2 = 15, nLast3 = 15;
+    int tmp_sms_volume_table[16];
+
+    for (int idx = 0; idx < 16; ++idx) {
+        tmp_sms_volume_table[idx] = real_sms_volume_table[idx]/3;
+    }
+
+    // we pick the voices in order, so that voice 1 is the biggest contributor, then 2, then 3
+    // we assume it's always additive, which I think is where this falls down on the TI.
+    // because of the order of the table, we just take the first one that's less than
+    int v1=15, v2=15, v3=15;    // mute in case not found
+    for (idx=0; idx < 16; idx++) {
+        if (tmp_sms_volume_table[idx] <= nTmp) {
+            v1 = idx;
+            break;
+        }
+    }
+    for (idx=0; idx < 16; idx++) {
+        if (tmp_sms_volume_table[idx]+tmp_sms_volume_table[v1] <= nTmp) {
+            v2 = idx;
+            break;
+        }
+    }
+    for (idx=0; idx < 16; idx++) {
+        if (tmp_sms_volume_table[idx]+tmp_sms_volume_table[v1]+tmp_sms_volume_table[v2] <= nTmp) {
+            v3 = idx;
+            break;
+        }
+    }
+
+    // now decide which one to return by seeing which gets us closest
+    int oldOut = tmp_sms_volume_table[nLast1]+tmp_sms_volume_table[nLast2]+tmp_sms_volume_table[nLast3];
+    int diff1 = abs((oldOut-tmp_sms_volume_table[nLast1]+tmp_sms_volume_table[v1])-nTmp);
+    int diff2 = abs((oldOut-tmp_sms_volume_table[nLast2]+tmp_sms_volume_table[v2])-nTmp);
+    int diff3 = abs((oldOut-tmp_sms_volume_table[nLast3]+tmp_sms_volume_table[v3])-nTmp);
+    if ((diff1 <= diff2) && (diff1 <= diff3)) {
+        nLast1 = v1;
+        return v1|0x90;
+    }
+    if ((diff2 <= diff1) && (diff2 <= diff3)) {
+        nLast2 = v2;
+        return v2|0xB0;
+    }
+    nLast3 = v3;
+    return v3|0xD0;
+
 
 #elif 1
     // this is the best result so far, it uses a hand-tuned volume table scaled for counts around center
@@ -174,6 +230,7 @@ int main(int argc, char* argv[])
 {
 	int DataSize = 0;
 
+    printf("audioconvert 20220721\n");
 	// open input WAV file and skip the header, because I don't care
 	if (argc < 3) {
 		printf("audioconvert <input.wav> <output.bin>\n");
@@ -248,7 +305,9 @@ int main(int argc, char* argv[])
 	int outpos = 0;
 
 	while (countdown--) {
-		waveout[outpos++] = maplevel(wavein[wavepos++]) | 0x90;
+        int ret = maplevel(wavein[wavepos++]);
+        if (ret < 0x80) ret |= 0x90;    // accomodate maplevel maybe returning a channel command
+		waveout[outpos++] = ret;
 	}
 
 	fp=fopen(argv[2], "wb");
@@ -267,10 +326,17 @@ int main(int argc, char* argv[])
 	}
 #if 0
 	// emulate square wave output at 2mult times input frequency
-    int mult = 16;
+    int mult = 2;
+    int l1=0,l2=0,l3=0;
 	for (int idx=0; idx<outpos; idx++) {
-		int outHi = real_sms_volume_table[waveout[idx]&0x0f]>>1;
-		int outLo = real_sms_volume_table[15-(waveout[idx]&0x0f)]>>1;
+        int c = waveout[idx];
+        switch (c&0xc0) {
+            case 0x80: l1 = c&0x0f; break;
+            case 0xa0: l2 = c&0x0f; break;
+            case 0xc0: l3 = c&0x0f; break;
+        }
+		int outHi = real_sms_volume_table[l1] + real_sms_volume_table[l2] + real_sms_volume_table[l3] / 3;
+		int outLo = 128 - outHi;
         for (int j=0; j<mult; ++j) {
             fputc(outHi, fp);
       		fputc(outLo, fp);
