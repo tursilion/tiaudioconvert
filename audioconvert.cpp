@@ -8,6 +8,7 @@
 #include <memory.h>
 
 unsigned char *wavein, *waveout;
+bool useRealTable = false;  // for generic samples, my scaled table sounds better. for precisely adjusted samples, the real one does.
 
 // 8 bit volume table (because 8-bit unsigned is being unwrapped)
 // These values are manually tweaked to give a more pleasing conversion,
@@ -175,13 +176,23 @@ int maplevel(int nTmp) {
 
 
 #elif 1
-    // this is the best result so far, it uses a hand-tuned volume table scaled for counts around center
-    for (idx=0; idx < 16; idx++) {
-		if (abs(sms_volume_table[idx]-nTmp) < nDistance) {
-			nBest = idx;
-			nDistance = abs(sms_volume_table[idx]-nTmp);
-		}
-	}
+    if (useRealTable) {
+        // this uses the real volume table and only works on very few samples
+        for (idx=0; idx < 16; idx++) {
+		    if (abs(real_sms_volume_table[idx]-nTmp) < nDistance) {
+			    nBest = idx;
+			    nDistance = abs(real_sms_volume_table[idx]-nTmp);
+		    }
+	    }
+    } else {
+        // this is the best result so far, it uses a hand-tuned volume table scaled for counts around center
+        for (idx=0; idx < 16; idx++) {
+		    if (abs(sms_volume_table[idx]-nTmp) < nDistance) {
+			    nBest = idx;
+			    nDistance = abs(sms_volume_table[idx]-nTmp);
+		    }
+	    }
+    }
 #elif 0
     // this version attempts to map only the magnitude of the change
     // this uses the real table. However, the output is pure noise with
@@ -230,12 +241,30 @@ int main(int argc, char* argv[])
 {
 	int DataSize = 0;
 
-    printf("audioconvert 20220721\n");
+    printf("audioconvert 20251121\n");
 	// open input WAV file and skip the header, because I don't care
+    // must already be 8 bit mono - samplerate will not be changed
 	if (argc < 3) {
-		printf("audioconvert <input.wav> <output.bin>\n");
+        // optionally pass 'pack' to pack 2 nibbles to a byte instead
+        // of appending the 0x90 sound command. Most significant nibble plays first.
+		printf("audioconvert <input.wav> <output.bin> [pack] [real]\n");
+        printf("Sample rate is preserved. 'pack' packs 2 nibbles to a byte, else it uses 0x90.\n");
+        printf("'real' uses the real mapping instead of the scaled mapping. This only works better\n");
+        printf("for samples that have been cleaned up and volume maximized, most of the time.\n");
 		return -1;
 	}
+    bool pack = false;
+    for (int i=3; i<argc; ++i) {
+        if (0 == strcmp(argv[i], "pack")) {
+            printf("Pack nibbles\n");
+            pack = true;
+        }
+        if (0 == strcmp(argv[i], "real")) {
+            printf("Real table\n");
+            useRealTable = true;
+        }
+    }
+    int packed = 0;
 
 	FILE *fp = fopen(argv[1], "rb");
 	if (NULL == fp) {
@@ -297,17 +326,30 @@ int main(int argc, char* argv[])
 	}
 
 	int countdown = (wavein[wavepos+4])+(wavein[wavepos+5]<<8)+(wavein[wavepos+6]<<16)+(wavein[wavepos+7]<<24);
-	if (countdown > insize) {
+	if ((countdown > insize)||(countdown > DataSize)) {
 		printf("Header reports invalid size\n");
 		return -1;
 	}
 	wavepos+=8;
 	int outpos = 0;
 
+    // if we're packing, discard last odd sample
+    if ((packed) && (countdown&1)) --countdown;
+
 	while (countdown--) {
         int ret = maplevel(wavein[wavepos++]);
-        if (ret < 0x80) ret |= 0x90;    // accomodate maplevel maybe returning a channel command
-		waveout[outpos++] = ret;
+        if (pack) {
+            // pack two nibbles
+            packed <<= 4;
+            packed |= (ret&0x0f);
+            if ((countdown&1)==0) {
+                waveout[outpos++] = packed&0xff;
+            }
+        } else {
+            // append sound command instead
+            if (ret < 0x80) ret |= 0x90;    // accomodate maplevel maybe returning a channel command
+	    	waveout[outpos++] = ret;
+        }
 	}
 
 	fp=fopen(argv[2], "wb");
@@ -319,7 +361,11 @@ int main(int argc, char* argv[])
 	fclose(fp);
 
 	// write a test file too - 8 bit raw signed
-	fp=fopen("testout.raw", "wb");
+    char outname[256];
+    memset(outname, 0, sizeof(outname));
+    strncpy(outname, argv[1], sizeof(outname)-16);
+    strcat(outname, "testout.raw");
+	fp=fopen(outname, "wb");
 	if (NULL == fp) {
 		printf("Can't open output file\n");
 		return -1;
@@ -344,8 +390,16 @@ int main(int argc, char* argv[])
 	}
 #else
 	for (int idx=0; idx<outpos; idx++) {
-		int out = real_sms_volume_table[waveout[idx]&0x0f]>>1;
-		fputc(out, fp);
+        if (packed) {
+            // two at a time
+            int out = real_sms_volume_table[(waveout[idx]&0xf0)>>4]>>1;
+	    	fputc(out, fp);
+            out = real_sms_volume_table[waveout[idx]&0xf]>>1;
+	    	fputc(out, fp);
+        } else {
+    		int out = real_sms_volume_table[waveout[idx]&0x0f]>>1;
+	    	fputc(out, fp);
+        }
 	}
 #endif
 	fclose(fp);
